@@ -3,8 +3,17 @@
     // AutoCel - Unified Script Panel
     // ============================================================
 
+    // Panel resize handler for responsive layout
+    function handlePanelResize() {
+        this.layout.resize();
+    }
+
+    function setupPanelResize(panel) {
+        panel.onResizing = panel.onResize = handlePanelResize;
+    }
+
     function buildUI(thisObj) {
-        var win = (thisObj instanceof Panel) ? thisObj : new Window("palette", "AutoCel", undefined);
+        var win = (thisObj instanceof Panel) ? thisObj : new Window("palette", "AutoCel", undefined, { resizable: true });
         win.orientation = "column";
         win.alignChildren = ["fill", "top"];
         win.spacing = 8;
@@ -16,12 +25,14 @@
         var celPanel = win.add("panel", undefined, "Cel");
         celPanel.orientation = "column";
         celPanel.alignChildren = ["fill", "top"];
+        celPanel.alignment = ["fill", "top"];
         celPanel.spacing = 5;
         celPanel.margins = 10;
 
         // --- Auto Image Sequence ---
         var btnAutoSeq = celPanel.add("button", undefined, "Auto Image Sequence");
         btnAutoSeq.preferredSize.height = 28;
+        btnAutoSeq.alignment = ["fill", "top"];
 
         btnAutoSeq.onClick = function () {
             app.beginUndoGroup("Auto Image Sequence");
@@ -153,6 +164,7 @@
         // --- Auto PreComp ---
         var btnAutoPrecomp = celPanel.add("button", undefined, "Auto PreComp");
         btnAutoPrecomp.preferredSize.height = 28;
+        btnAutoPrecomp.alignment = ["fill", "top"];
 
         btnAutoPrecomp.onClick = function () {
             function cleanSequenceName(name) {
@@ -263,6 +275,7 @@
         // --- CSV Comp Linker ---
         var btnCSVLinker = celPanel.add("button", undefined, "CSV Comp Linker");
         btnCSVLinker.preferredSize.height = 28;
+        btnCSVLinker.alignment = ["fill", "top"];
 
         btnCSVLinker.onClick = function () {
             app.beginUndoGroup("CSV Comp Linker");
@@ -447,18 +460,22 @@
         var durationGrp = celPanel.add("group");
         durationGrp.orientation = "column";
         durationGrp.alignChildren = ["fill", "top"];
+        durationGrp.alignment = ["fill", "top"];
         durationGrp.spacing = 3;
 
         var durationLabel = durationGrp.add("statictext", undefined, "Batch Comp Duration:");
         durationLabel.graphics.font = ScriptUI.newFont(durationLabel.graphics.font.name, "Bold", 11);
 
         var modeGrp = durationGrp.add("group");
+        modeGrp.orientation = "row";
+        modeGrp.alignment = ["center", "top"];
         var radioFrame = modeGrp.add("radiobutton", undefined, "Frames");
         var radioSecFrame = modeGrp.add("radiobutton", undefined, "Sec+Frames");
         radioFrame.value = true;
 
         var inputGrp = durationGrp.add("group");
         inputGrp.orientation = "row";
+        inputGrp.alignment = ["center", "top"];
 
         var valSec = inputGrp.add("edittext", undefined, "1");
         valSec.characters = 4;
@@ -484,6 +501,7 @@
 
         var btnDuration = durationGrp.add("button", undefined, "Apply Duration");
         btnDuration.preferredSize.height = 28;
+        btnDuration.alignment = ["fill", "top"];
 
         btnDuration.onClick = function () {
             var selectedItems = app.project.selection;
@@ -525,6 +543,7 @@
         var cameraPanel = win.add("panel", undefined, "Camera");
         cameraPanel.orientation = "column";
         cameraPanel.alignChildren = ["fill", "top"];
+        cameraPanel.alignment = ["fill", "top"];
         cameraPanel.spacing = 5;
         cameraPanel.margins = 10;
 
@@ -532,12 +551,15 @@
         var camDataGrp = cameraPanel.add("group");
         camDataGrp.orientation = "column";
         camDataGrp.alignChildren = ["fill", "top"];
+        camDataGrp.alignment = ["fill", "top"];
         camDataGrp.spacing = 3;
 
         var camDataLabel = camDataGrp.add("statictext", undefined, "Import Camera Data:");
         camDataLabel.graphics.font = ScriptUI.newFont(camDataLabel.graphics.font.name, "Bold", 11);
 
         var sizeGrp = camDataGrp.add("group");
+        sizeGrp.orientation = "row";
+        sizeGrp.alignment = ["center", "top"];
         sizeGrp.add("statictext", undefined, "W:");
         var widthIn = sizeGrp.add("edittext", undefined, "1920");
         widthIn.characters = 5;
@@ -547,6 +569,7 @@
 
         var btnImportCam = camDataGrp.add("button", undefined, "Import Camera CSV");
         btnImportCam.preferredSize.height = 28;
+        btnImportCam.alignment = ["fill", "top"];
 
         btnImportCam.onClick = function () {
             var comp = app.project.activeItem;
@@ -645,6 +668,7 @@
 
         var btnCameraLink = cameraPanel.add("button", undefined, "Camera Link");
         btnCameraLink.preferredSize.height = 28;
+        btnCameraLink.alignment = ["fill", "top"];
 
         btnCameraLink.onClick = function () {
             app.beginUndoGroup("Apply Camera Link");
@@ -738,11 +762,19 @@
         // ============================================================
         // SHOW WINDOW
         // ============================================================
+        // Setup resize handler for docked panels
+        if (win instanceof Panel) {
+            setupPanelResize(win);
+        }
+
+        if (win.layout) {
+            win.layout.layout(true);
+            win.layout.resize();
+        }
+
         if (win instanceof Window) {
             win.center();
             win.show();
-        } else {
-            win.layout.layout(true);
         }
 
         return win;
