@@ -157,16 +157,29 @@ class ExtractorThread(QThread):
     def get_value_from_field(self, coords):
         """Double-clicks the field, copies its value, and returns the clipboard content."""
         try:
+            # Check if still running before each action
+            if not self.running:
+                return ""
+            
             # Double-click to select the field
             pyautogui.doubleClick(coords)
             time.sleep(0.1)
             
+            if not self.running:
+                return ""
+            
             # Select all text in the field
             pyautogui.hotkey('ctrl', 'a')
+            time.sleep(0.1)
+            if not self.running:
+                return ""
             
             # Copy the selected text
             pyautogui.hotkey('ctrl', 'c')
             time.sleep(0.2)  # Allow time for the clipboard to update
+            
+            if not self.running:
+                return ""
             
             # Press ESC to deselect
             pyautogui.hotkey('esc')
@@ -182,21 +195,33 @@ class ExtractorThread(QThread):
     def run(self):
         try:
             for i in range(self.total_keyframes):
+                # Check if should stop
                 if not self.running:
+                    print("Stopping extraction (user requested)")
                     break
                 
                 row_data = {"Keyframe_Index": i + 1}
                 
                 # Retrieve values from each field
                 for field_name, coords in self.fields.items():
+                    if not self.running:
+                        break
+                    
                     val = self.get_value_from_field(coords)
                     row_data[field_name] = val
                     print(f"Keyframe {i+1}, {field_name}: {val}")  # Debug output
+                
+                # Check again before emitting
+                if not self.running:
+                    break
                 
                 self.data_extracted.emit(row_data)
                 
                 # Advance to the next keyframe (except for the last one)
                 if i < self.total_keyframes - 1:
+                    if not self.running:
+                        break
+                    
                     # Parse key sequence and execute
                     # Format can be like "F9", "Ctrl+P", "Shift+F9", etc.
                     keys = self.next_key.lower().replace(' ', '')
@@ -211,10 +236,19 @@ class ExtractorThread(QThread):
                         # It's a combination, use hotkey
                         pyautogui.hotkey(*parts)
                     
-                    time.sleep(0.6)  # เพิ่มเวลารอให้หน้าจออัปเดต
+                    # Split sleep into smaller chunks to check running flag
+                    for _ in range(6):  # 6 x 0.1 = 0.6 seconds
+                        if not self.running:
+                            break
+                        time.sleep(0.1)
             
-            self.extraction_complete.emit()
-            print("Extraction completed successfully")
+            # Only emit complete if not stopped
+            if self.running:
+                self.extraction_complete.emit()
+                print("Extraction completed successfully")
+            else:
+                print("Extraction stopped by user")
+                
         except Exception as e:
             print(f"Extraction error: {e}")
             self.error_occurred.emit(str(e))
@@ -234,9 +268,31 @@ class CameraExtractorApp(QMainWindow):
         self.next_keyframe_button = "F9"
         self.data = []
         self.extractor_thread = None
+        self.extraction_active = False  # Flag to track extraction state
+        
+        # Setup global hotkey for ESC
+        self.setup_global_hotkey()
         
         self.init_ui()
         self.apply_dark_theme()
+    
+    def setup_global_hotkey(self):
+        """Setup global ESC hotkey that works even during extraction"""
+        try:
+            # Remove any existing ESC hooks first
+            keyboard.unhook_all()
+            
+            # Add global ESC hotkey
+            keyboard.add_hotkey('esc', self.on_global_esc, suppress=False)
+        except Exception as e:
+            print(f"Warning: Could not setup global hotkey: {e}")
+    
+    def on_global_esc(self):
+        """Handle global ESC press - works even during extraction"""
+        if self.extraction_active and self.extractor_thread and self.extractor_thread.isRunning():
+            print("ESC detected - stopping extraction...")
+            # Use QTimer to call stop_extraction from main thread
+            QTimer.singleShot(0, self.stop_extraction)
     
     def init_ui(self):
         self.setWindowTitle("Camera Keyframe Extractor")
@@ -360,12 +416,6 @@ class CameraExtractorApp(QMainWindow):
         self.start_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.start_btn.clicked.connect(self.start_extraction)
         
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setMinimumHeight(36)
-        self.stop_btn.setFont(QFont("Segoe UI", 10))
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop_extraction)
-        
         self.clear_btn = QPushButton("Clear Data")
         self.clear_btn.setMinimumHeight(36)
         self.clear_btn.setFont(QFont("Segoe UI", 10))
@@ -376,15 +426,14 @@ class CameraExtractorApp(QMainWindow):
         self.export_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.export_btn.clicked.connect(self.export_csv)
         
-        control_layout.addWidget(self.start_btn, 2)
-        control_layout.addWidget(self.stop_btn, 1)
-        control_layout.addWidget(self.clear_btn, 1)
-        control_layout.addWidget(self.export_btn, 2)
+        control_layout.addWidget(self.start_btn, 3)
+        control_layout.addWidget(self.clear_btn, 2)
+        control_layout.addWidget(self.export_btn, 3)
         
         main_layout.addLayout(control_layout)
         
-        # Status Label
-        self.status_label = QLabel("Ready")
+        # Status Label with hotkey info
+        self.status_label = QLabel("Ready - Press ESC anytime to stop extraction")
         self.status_label.setFont(QFont("Segoe UI", 9))
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setMinimumHeight(24)
@@ -546,6 +595,13 @@ class CameraExtractorApp(QMainWindow):
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
         self.show()
     
+    def keyPressEvent(self, event):
+        """Handle keyboard events - ESC to stop extraction"""
+        if event.key() == Qt.Key.Key_Escape:
+            if hasattr(self, 'extractor_thread') and self.extractor_thread and self.extractor_thread.isRunning():
+                self.stop_extraction()
+        super().keyPressEvent(event)
+    
     def select_field_position(self, field_name):
         """Start position picking for a specific field"""
         self.status_label.setText(f"Click anywhere on screen to set {field_name} position...")
@@ -589,11 +645,11 @@ class CameraExtractorApp(QMainWindow):
         
         total_keyframes = self.keyframe_input.value()
         
-        self.status_label.setText("Extracting data... Please keep CSP visible!")
+        self.status_label.setText("Extracting... Press ESC anytime to stop | Keep CSP visible!")
         self.status_label.setStyleSheet("color: #f59e0b;")
         
         self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self.extraction_active = True  # Mark extraction as active
         
         # Clear previous data
         self.data = []
@@ -611,15 +667,48 @@ class CameraExtractorApp(QMainWindow):
         QTimer.singleShot(2000, self.extractor_thread.start)
     
     def stop_extraction(self):
-        """Stop the extraction process"""
-        if self.extractor_thread:
-            self.extractor_thread.stop()
+        """Stop the extraction process safely"""
+        print("Stop extraction requested...")
         
+        if self.extractor_thread and self.extractor_thread.isRunning():
+            # Signal thread to stop
+            self.extractor_thread.stop()
+            
+            # Update status immediately
+            self.status_label.setText("Stopping... Please wait")
+            self.status_label.setStyleSheet("color: #f59e0b;")
+            
+            # Process events to keep UI responsive
+            QApplication.processEvents()
+            
+            # Wait for thread to finish (with timeout)
+            wait_time = 0
+            max_wait = 3000  # 3 seconds max
+            while self.extractor_thread.isRunning() and wait_time < max_wait:
+                QApplication.processEvents()  # Keep UI responsive
+                self.extractor_thread.wait(100)  # Wait 100ms at a time
+                wait_time += 100
+            
+            # Force terminate if still running
+            if self.extractor_thread.isRunning():
+                print("Thread did not stop gracefully, forcing termination")
+                self.extractor_thread.terminate()
+                self.extractor_thread.wait()
+        
+        # Reset state
+        self.extraction_active = False
         self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.status_label.setText("Extraction stopped by user")
+        self.status_label.setText("Extraction stopped by user (ESC pressed)")
         self.status_label.setStyleSheet("color: #ef4444;")
+        
+        # Restore window
         self.showNormal()
+        self.activateWindow()
+        
+        # Process final events
+        QApplication.processEvents()
+        
+        print("Stop extraction completed")
     
     def on_data_extracted(self, row_data):
         """Handle extracted data (real-time update)"""
@@ -640,12 +729,12 @@ class CameraExtractorApp(QMainWindow):
         # R
         self.table.setItem(row_position, 4, QTableWidgetItem(row_data.get("Rotation", "")))
         
-        self.status_label.setText(f"Extracted keyframe {row_data['Keyframe_Index']}")
+        self.status_label.setText(f"Extracting keyframe {row_data['Keyframe_Index']}... (ESC works anytime!)")
     
     def on_extraction_complete(self):
         """Handle extraction completion"""
+        self.extraction_active = False  # Mark extraction as inactive
         self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
         self.status_label.setText(f"Extraction complete! Total keyframes: {len(self.data)}")
         self.status_label.setStyleSheet("color: #10b981;")
         self.showNormal()
@@ -653,11 +742,12 @@ class CameraExtractorApp(QMainWindow):
     
     def on_error(self, error_msg):
         """Handle extraction error"""
+        self.extraction_active = False  # Mark extraction as inactive
         self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
         self.status_label.setText(f"Error: {error_msg}")
         self.status_label.setStyleSheet("color: #ef4444;")
         self.showNormal()
+        self.activateWindow()
         QMessageBox.critical(self, "Error", f"An error occurred:\n{error_msg}")
     
     def clear_data(self):
@@ -712,6 +802,20 @@ class CameraExtractorApp(QMainWindow):
                 QMessageBox.information(self, "Success", f"Data exported successfully to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to export data:\n{str(e)}")
+    
+    def closeEvent(self, event):
+        """Cleanup when closing the application"""
+        # Stop extraction if running
+        if self.extraction_active and self.extractor_thread:
+            self.extractor_thread.stop()
+        
+        # Remove global hotkeys
+        try:
+            keyboard.unhook_all()
+        except:
+            pass
+        
+        event.accept()
 
 def main():
     app = QApplication(sys.argv)
