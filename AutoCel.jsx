@@ -181,37 +181,131 @@
                 renameWin.spacing = 10;
                 renameWin.margins = 16;
 
-                var scrollGroup = renameWin.add("panel", undefined, "Selected Files");
+                // Number of PreComp Levels
+                var levelGroup = renameWin.add("group");
+                levelGroup.orientation = "row";
+                levelGroup.alignment = ["left", "center"];
+                levelGroup.add("statictext", undefined, "Number of PreComp Levels:");
+                var levelInput = levelGroup.add("edittext", undefined, "2");
+                levelInput.characters = 3;
+                var btnUpdate = levelGroup.add("button", undefined, "Update");
+
+                // Create scrolling group with fixed height
+                var scrollPanel = renameWin.add("panel", undefined, "Compositions to Create");
+                scrollPanel.orientation = "stack";
+                scrollPanel.alignment = ["fill", "fill"];
+                scrollPanel.preferredSize = [420, 400];
+
+                var scrollGroup = scrollPanel.add("group");
                 scrollGroup.orientation = "column";
                 scrollGroup.alignChildren = ["left", "top"];
-                scrollGroup.maximumSize.height = 400;
+                scrollGroup.alignment = ["fill", "top"];
 
-                var inputRows = [];
+                var inputData = [];
 
-                for (var i = 0; i < items.length; i++) {
-                    var suggestedName = cleanSequenceName(items[i].name);
-                    var row = scrollGroup.add("group");
-                    row.add(
-                        "statictext",
-                        [0, 0, 180, 25],
-                        (i + 1) + ". " + items[i].name,
-                        { truncate: "middle" }
-                    );
-                    var editField = row.add("edittext", [0, 0, 200, 25], suggestedName);
-                    inputRows.push(editField);
+                function buildCompList(numLevels) {
+                    // Clear existing items
+                    while (scrollGroup.children.length > 0) {
+                        scrollGroup.remove(scrollGroup.children[0]);
+                    }
+                    inputData = [];
+
+                    for (var i = 0; i < items.length; i++) {
+                        var suggestedName = cleanSequenceName(items[i].name);
+
+                        // Add header for this footage item
+                        var headerGroup = scrollGroup.add("group");
+                        headerGroup.orientation = "column";
+                        headerGroup.alignChildren = ["left", "top"];
+                        headerGroup.spacing = 3;
+
+                        var header = headerGroup.add("statictext", undefined, (i + 1) + ". " + items[i].name);
+                        header.graphics.font = ScriptUI.newFont(header.graphics.font.name, "Bold", 11);
+
+                        var itemInputs = [];
+
+                        // Create inputs for each level
+                        for (var level = 1; level <= numLevels; level++) {
+                            var row = headerGroup.add("group");
+                            row.orientation = "row";
+                            row.spacing = 5;
+
+                            var levelLabel = row.add("statictext", undefined, "  Level " + level + ":");
+                            levelLabel.preferredSize.width = 60;
+
+                            var compName = suggestedName;
+                            if (level === 1) {
+                                compName = suggestedName;
+                            } else if (level === 2) {
+                                compName = suggestedName + "_comp";
+                            } else {
+                                compName = suggestedName + "_comp" + (level - 1);
+                            }
+
+                            var editField = row.add("edittext", undefined, compName);
+                            editField.preferredSize.width = 300;
+
+                            itemInputs.push(editField);
+                        }
+
+                        inputData.push({
+                            item: items[i],
+                            inputs: itemInputs
+                        });
+
+                        // Add spacing between items
+                        if (i < items.length - 1) {
+                            headerGroup.add("statictext", undefined, "");
+                        }
+                    }
+
+                    renameWin.layout.layout(true);
+                    renameWin.layout.resize();
                 }
+
+                // Initial build with 2 levels
+                buildCompList(2);
+
+                // Update button click handler
+                btnUpdate.onClick = function () {
+                    var levels = parseInt(levelInput.text);
+                    if (isNaN(levels) || levels < 1) {
+                        alert("Please enter a valid number (minimum 1).");
+                        levelInput.text = "2";
+                        return;
+                    }
+                    if (levels > 10) {
+                        alert("Maximum 10 levels allowed.");
+                        levelInput.text = "10";
+                        levels = 10;
+                    }
+                    buildCompList(levels);
+                };
+
+                var divider = renameWin.add("panel");
+                divider.alignment = "fill";
+                divider.preferredSize.height = 2;
 
                 var btnGroup = renameWin.add("group");
                 btnGroup.alignment = "center";
-                btnGroup.add("button", undefined, "Cancel");
-                btnGroup.add("button", undefined, "Create", { name: "ok" });
+                btnGroup.orientation = "row";
+                var btnCancel = btnGroup.add("button", undefined, "Cancel");
+                var btnCreate = btnGroup.add("button", undefined, "Create");
 
+                btnCancel.onClick = function () {
+                    renameWin.close(0);
+                };
+
+                btnCreate.onClick = function () {
+                    renameWin.close(1);
+                };
+
+                // Rebuild once after buttons are created to fix layout
+                buildCompList(2);
+
+                // Trigger update after showing to fix layout
                 if (renameWin.show() === 1) {
-                    var names = [];
-                    for (var j = 0; j < inputRows.length; j++) {
-                        names.push(inputRows[j].text || "Comp_" + j);
-                    }
-                    return names;
+                    return inputData;
                 }
                 return null;
             }
@@ -228,43 +322,49 @@
             if (selectedItems.length === 0) {
                 alert("Please select Footage items in the Project Panel.");
             } else {
-                var newNames = createBatchRenameUI(selectedItems);
+                var compData = createBatchRenameUI(selectedItems);
 
-                if (newNames !== null) {
+                if (compData !== null) {
                     app.beginUndoGroup("Batch PreComp");
 
-                    for (var k = 0; k < selectedItems.length; k++) {
-                        var item = selectedItems[k];
-                        var userName = newNames[k];
-                        var targetFolder = item.parentFolder;
+                    for (var k = 0; k < compData.length; k++) {
+                        var item = compData[k].item;
+                        var compNames = [];
+                        for (var n = 0; n < compData[k].inputs.length; n++) {
+                            compNames.push(compData[k].inputs[n].text || "Comp_" + k + "_" + n);
+                        }
 
+                        var targetFolder = item.parentFolder;
                         var width = (item.width > 0) ? item.width : 1920;
                         var height = (item.height > 0) ? item.height : 1080;
                         var pixelAspect = item.pixelAspect || 1;
                         var frameRate = item.frameRate || 30;
                         var duration = item.duration || (1 / frameRate);
 
-                        var innerComp = project.items.addComp(
-                            userName,
-                            width,
-                            height,
-                            pixelAspect,
-                            duration,
-                            frameRate
-                        );
-                        innerComp.parentFolder = targetFolder;
-                        innerComp.layers.add(item);
+                        // Create nested compositions
+                        var previousComp = null;
 
-                        var outerComp = project.items.addComp(
-                            userName + "_comp",
-                            width,
-                            height,
-                            pixelAspect,
-                            duration,
-                            frameRate
-                        );
-                        outerComp.parentFolder = targetFolder;
-                        outerComp.layers.add(innerComp);
+                        for (var level = 0; level < compNames.length; level++) {
+                            var newComp = project.items.addComp(
+                                compNames[level],
+                                width,
+                                height,
+                                pixelAspect,
+                                duration,
+                                frameRate
+                            );
+                            newComp.parentFolder = targetFolder;
+
+                            if (level === 0) {
+                                // First level: add the footage item
+                                newComp.layers.add(item);
+                            } else {
+                                // Subsequent levels: add the previous comp
+                                newComp.layers.add(previousComp);
+                            }
+
+                            previousComp = newComp;
+                        }
                     }
 
                     app.endUndoGroup();
@@ -452,86 +552,192 @@
             app.endUndoGroup();
         };
 
-        // --- Batch Comp Duration ---
+        // --- Divider ---
         var divider1 = celPanel.add("panel");
         divider1.alignment = "fill";
         divider1.preferredSize.height = 2;
 
-        var durationGrp = celPanel.add("group");
-        durationGrp.orientation = "column";
-        durationGrp.alignChildren = ["fill", "top"];
-        durationGrp.alignment = ["fill", "top"];
-        durationGrp.spacing = 3;
+        // --- Composition Settings ---
+        var compSettingsGrp = celPanel.add("group");
+        compSettingsGrp.orientation = "column";
+        compSettingsGrp.alignChildren = ["left", "top"];
+        compSettingsGrp.alignment = ["fill", "top"];
+        compSettingsGrp.spacing = 3;
 
-        var durationLabel = durationGrp.add("statictext", undefined, "Batch Comp Duration:");
-        durationLabel.graphics.font = ScriptUI.newFont(durationLabel.graphics.font.name, "Bold", 11);
+        var compSettingsLabel = compSettingsGrp.add("statictext", undefined, "Composition Settings:");
+        compSettingsLabel.graphics.font = ScriptUI.newFont(compSettingsLabel.graphics.font.name, "Bold", 11);
 
-        var modeGrp = durationGrp.add("group");
-        modeGrp.orientation = "row";
-        modeGrp.alignment = ["center", "top"];
-        var radioFrame = modeGrp.add("radiobutton", undefined, "Frames");
-        var radioSecFrame = modeGrp.add("radiobutton", undefined, "Sec+Frames");
-        radioFrame.value = true;
+        // Width
+        var widthGrp = compSettingsGrp.add("group");
+        widthGrp.orientation = "row";
+        widthGrp.alignment = ["left", "center"];
+        var widthCheck = widthGrp.add("checkbox", undefined, "Width:");
+        widthCheck.preferredSize.width = 60;
+        var widthInput = widthGrp.add("edittext", undefined, "1920");
+        widthInput.characters = 5;
+        widthInput.enabled = false;
 
-        var inputGrp = durationGrp.add("group");
-        inputGrp.orientation = "row";
-        inputGrp.alignment = ["center", "top"];
-
-        var valSec = inputGrp.add("edittext", undefined, "1");
-        valSec.characters = 4;
-        valSec.visible = false;
-        var lblSec = inputGrp.add("statictext", undefined, "s +");
-        lblSec.visible = false;
-
-        var valFrm = inputGrp.add("edittext", undefined, "1");
-        valFrm.characters = 4;
-        var lblFrm = inputGrp.add("statictext", undefined, "f");
-
-        radioFrame.onClick = function () {
-            valSec.visible = false;
-            lblSec.visible = false;
-            valFrm.text = "1";
-        };
-        radioSecFrame.onClick = function () {
-            valSec.visible = true;
-            lblSec.visible = true;
-            valSec.text = "1";
-            valFrm.text = "0";
+        widthCheck.onClick = function () {
+            widthInput.enabled = this.value;
         };
 
-        var btnDuration = durationGrp.add("button", undefined, "Apply Duration");
-        btnDuration.preferredSize.height = 28;
-        btnDuration.alignment = ["fill", "top"];
+        // Height
+        var heightGrp = compSettingsGrp.add("group");
+        heightGrp.orientation = "row";
+        heightGrp.alignment = ["left", "center"];
+        var heightCheck = heightGrp.add("checkbox", undefined, "Height:");
+        heightCheck.preferredSize.width = 60;
+        var heightInput = heightGrp.add("edittext", undefined, "1080");
+        heightInput.characters = 5;
+        heightInput.enabled = false;
 
-        btnDuration.onClick = function () {
-            var selectedItems = app.project.selection;
-            var comps = [];
+        heightCheck.onClick = function () {
+            heightInput.enabled = this.value;
+        };
 
-            for (var i = 0; i < selectedItems.length; i++) {
-                if (selectedItems[i] instanceof CompItem) {
-                    comps.push(selectedItems[i]);
-                }
+        // FPS
+        var fpsGrp = compSettingsGrp.add("group");
+        fpsGrp.orientation = "row";
+        fpsGrp.alignment = ["left", "center"];
+        var fpsCheck = fpsGrp.add("checkbox", undefined, "FPS:");
+        fpsCheck.preferredSize.width = 60;
+        fpsCheck.value = true;
+        var fpsInput = fpsGrp.add("edittext", undefined, "24");
+        fpsInput.characters = 5;
+        fpsInput.enabled = true;
+
+        fpsCheck.onClick = function () {
+            fpsInput.enabled = this.value;
+        };
+
+        // Duration Radio
+        var durationModeGrp = compSettingsGrp.add("group");
+        durationModeGrp.orientation = "row";
+        durationModeGrp.alignment = ["left", "center"];
+        var durationCheck = durationModeGrp.add("checkbox");
+        durationCheck.preferredSize.width = 20;
+        durationCheck.value = true;
+        var durationRadioFrames = durationModeGrp.add("radiobutton", undefined, "Frames");
+        var durationRadioSecFrames = durationModeGrp.add("radiobutton", undefined, "Sec+Frames");
+        durationRadioFrames.value = true;
+        durationRadioFrames.enabled = true;
+        durationRadioSecFrames.enabled = true;
+
+        durationCheck.onClick = function () {
+            var enabled = this.value;
+            durationRadioFrames.enabled = enabled;
+            durationRadioSecFrames.enabled = enabled;
+            durationSecInput.enabled = enabled && durationRadioSecFrames.value;
+            durationFrameInput.enabled = enabled;
+        };
+
+        // Duration Input
+        var durationInputGrp = compSettingsGrp.add("group");
+        durationInputGrp.orientation = "row";
+        durationInputGrp.alignment = ["left", "center"];
+
+        var durationSecInput = durationInputGrp.add("edittext", undefined, "1");
+        durationSecInput.characters = 4;
+        durationSecInput.visible = false;
+        durationSecInput.enabled = false;
+
+        var durationSecLabel = durationInputGrp.add("statictext", undefined, "Sec");
+        durationSecLabel.visible = false;
+
+        var durationFrameInput = durationInputGrp.add("edittext", undefined, "1");
+        durationFrameInput.characters = 4;
+        durationFrameInput.enabled = true;
+
+        var durationFrameLabel = durationInputGrp.add("statictext", undefined, "Frame");
+
+        durationRadioFrames.onClick = function () {
+            if (durationCheck.value) {
+                durationSecInput.visible = false;
+                durationSecLabel.visible = false;
+                durationSecInput.enabled = false;
+                durationFrameInput.enabled = true;
+                durationFrameInput.text = "1";
             }
+        };
 
-            if (comps.length === 0) {
-                alert("Please select at least one Composition.");
+        durationRadioSecFrames.onClick = function () {
+            if (durationCheck.value) {
+                durationSecInput.visible = true;
+                durationSecLabel.visible = true;
+                durationSecInput.enabled = true;
+                durationFrameInput.enabled = true;
+                durationSecInput.text = "1";
+                durationFrameInput.text = "0";
+            }
+        };
+
+        // Apply Button
+        var btnApplySettings = compSettingsGrp.add("button", undefined, "Apply Settings");
+        btnApplySettings.preferredSize.height = 28;
+        btnApplySettings.alignment = ["fill", "top"];
+
+        btnApplySettings.onClick = function () {
+            var selectedComps = [];
+            var selection = app.project.selection;
+
+            if (selection.length === 0) {
+                alert("Please select at least one composition in the Project panel.");
                 return;
             }
 
-            app.beginUndoGroup("Change Duration");
+            for (var i = 0; i < selection.length; i++) {
+                if (selection[i] instanceof CompItem) {
+                    selectedComps.push(selection[i]);
+                }
+            }
 
-            for (var j = 0; j < comps.length; j++) {
-                var c = comps[j];
-                var fps = 1 / c.frameDuration;
-                var totalFrames = 0;
+            if (selectedComps.length === 0) {
+                alert("No compositions found in selection. Please select compositions.");
+                return;
+            }
 
-                if (radioFrame.value) {
-                    totalFrames = parseInt(valFrm.text);
-                } else {
-                    totalFrames = (parseInt(valSec.text) * fps) + parseInt(valFrm.text);
+            app.beginUndoGroup("Batch Composition Settings");
+
+            for (var j = 0; j < selectedComps.length; j++) {
+                var comp = selectedComps[j];
+
+                // Apply Width
+                if (widthCheck.value) {
+                    var w = parseInt(widthInput.text);
+                    if (!isNaN(w) && w > 0) {
+                        comp.width = w;
+                    }
                 }
 
-                c.duration = totalFrames / fps;
+                // Apply Height
+                if (heightCheck.value) {
+                    var h = parseInt(heightInput.text);
+                    if (!isNaN(h) && h > 0) {
+                        comp.height = h;
+                    }
+                }
+
+                // Apply Frame Rate
+                if (fpsCheck.value) {
+                    var fps = parseFloat(fpsInput.text);
+                    if (!isNaN(fps) && fps > 0) {
+                        comp.frameRate = fps;
+                    }
+                }
+
+                // Apply Duration
+                if (durationCheck.value) {
+                    var fps = 1 / comp.frameDuration;
+                    var totalFrames = 0;
+
+                    if (durationRadioFrames.value) {
+                        totalFrames = parseInt(durationFrameInput.text);
+                    } else {
+                        totalFrames = (parseInt(durationSecInput.text) * fps) + parseInt(durationFrameInput.text);
+                    }
+
+                    comp.duration = totalFrames / fps;
+                }
             }
 
             app.endUndoGroup();
@@ -550,7 +756,7 @@
         // --- Import Camera Data ---
         var camDataGrp = cameraPanel.add("group");
         camDataGrp.orientation = "column";
-        camDataGrp.alignChildren = ["fill", "top"];
+        camDataGrp.alignChildren = ["left", "top"];
         camDataGrp.alignment = ["fill", "top"];
         camDataGrp.spacing = 3;
 
@@ -559,13 +765,13 @@
 
         var sizeGrp = camDataGrp.add("group");
         sizeGrp.orientation = "row";
-        sizeGrp.alignment = ["center", "top"];
-        sizeGrp.add("statictext", undefined, "W:");
-        var widthIn = sizeGrp.add("edittext", undefined, "1920");
-        widthIn.characters = 5;
-        sizeGrp.add("statictext", undefined, "H:");
-        var heightIn = sizeGrp.add("edittext", undefined, "1080");
-        heightIn.characters = 5;
+        sizeGrp.alignment = ["left", "center"];
+        sizeGrp.add("statictext", undefined, "Width:");
+        var camWidthIn = sizeGrp.add("edittext", undefined, "1920");
+        camWidthIn.characters = 5;
+        sizeGrp.add("statictext", undefined, "Height:");
+        var camHeightIn = sizeGrp.add("edittext", undefined, "1080");
+        camHeightIn.characters = 5;
 
         var btnImportCam = camDataGrp.add("button", undefined, "Import Camera CSV");
         btnImportCam.preferredSize.height = 28;
@@ -613,8 +819,8 @@
 
             app.beginUndoGroup("Create Camera Solid");
 
-            var w = parseInt(widthIn.text);
-            var h = parseInt(heightIn.text);
+            var w = parseInt(camWidthIn.text);
+            var h = parseInt(camHeightIn.text);
             var cameraSolid = comp.layers.addSolid([1, 1, 1], "camera", w, h, 1.0);
             cameraSolid.guideLayer = true;
             cameraSolid.label = 1;
